@@ -1,0 +1,327 @@
+<template>
+  <div class="container">
+    <!-- 输入搜索框 -->
+    <a-input-search
+            v-model="newTodo"
+            placeholder="请输入您要查询的问题"
+            enter-button="查询"
+            size="large"
+            @search="onSearch"
+            class="header-container"
+    />
+
+    <!-- 选择器提示和选择器 -->
+    <div class="selectors">
+      <div class="selector-prompt">请选择X轴数据：</div>
+      <a-select v-model:value="xAxisColumn" style="width: 200px" :options="columnOptions" @change="handleSelectorChange" />
+      <div class="selector-prompt">请选择Y轴数据：</div>
+      <a-select v-model:value="yAxisColumn" style="width: 200px" :options="columnOptions" @change="handleSelectorChange" />
+    </div>
+
+    <!-- 表格和图表切换 -->
+    <div class="content-switcher">
+      <div v-if="viewType === 'table'" class="table-container">
+        <a-table :data-source="dataSource" :columns="columns" class="table-div" />
+      </div>
+      <div v-else class="chart-container">
+        <v-chart ref="chartRef" :option="chartOption" />
+      </div>
+    </div>
+
+    <!-- 可视化/表格切换按钮 -->
+    <div class="toggle-button-container">
+      <a-button v-if="viewType === 'table'" @click="toggleView('line')" class="toggle-button">
+        可视化
+      </a-button>
+      <a-button v-else @click="toggleView('table')" class="toggle-button">
+        表格
+      </a-button>
+      <a-button v-if="viewType !== 'table' && chartType !== 'line'" @click="toggleChartType('line')" class="toggle-button">
+        折线图
+      </a-button>
+      <a-button v-if="viewType !== 'table' && chartType !== 'scatter'" @click="toggleChartType('scatter')" class="toggle-button">
+        散点图
+      </a-button>
+      <a-button v-if="viewType !== 'table' && chartType !== 'bar'" @click="toggleChartType('bar')" class="toggle-button">
+        柱状图
+      </a-button>
+    </div>
+  </div>
+</template>
+
+<script>
+  import { ref, computed } from 'vue';
+  import { Input, Button, TableColumnsType, Select } from 'ant-design-vue';
+  import * as echarts from 'echarts/core';
+  import { use } from 'echarts/core';
+  import { CanvasRenderer } from 'echarts/renderers';
+  import { LineChart, ScatterChart, BarChart } from 'echarts/charts';
+  import { GridComponent, TooltipComponent } from 'echarts/components';
+  import VChart from 'vue-echarts';
+  import axios from 'axios';
+
+  // 注册必须的组件
+  use([CanvasRenderer, LineChart, ScatterChart, BarChart, GridComponent, TooltipComponent]);
+
+  export default {
+    components: {
+      AInputSearch: Input.Search,
+      AButton: Button,
+      ASelect: Select,
+      VChart,
+    },
+    setup() {
+      const newTodo = ref('');
+      const viewType = ref('table'); // 默认为表格视图
+      const chartType = ref('line'); // 默认为折线图
+      const db_id = ref('perpetrator');
+      const xAxisColumn = ref('');
+      const yAxisColumn = ref('');
+      const chartRef = ref(null);
+
+      function onSearch(value) {
+        if (typeof value === 'undefined' || value.trim() === '') {
+          alert('问题不能为空');
+          return;
+        }
+
+        axios.post('http://127.0.0.1:5000/axios', { 'question': value, 'db_id': db_id.value })
+          .then(response => {
+            // 更新响应式数据
+            dataSource.value = response.data[0];
+            columns.value = response.data[1];
+
+            console.log("后端返回成功", response.data[0]);
+            console.log("后端返回成功", response.data[1]);
+          })
+          .catch(error => {
+            console.error('请求失败:', error);
+          });
+      };
+
+      const toggleView = (type) => {
+        if (type === 'table') {
+          // 切换回表格视图
+          viewType.value = 'table';
+        } else {
+          if (!xAxisColumn.value || !yAxisColumn.value) {
+            // 如果用户没有选择，则使用默认值
+            xAxisColumn.value = columns.value[0].dataIndex; // 第一列
+            yAxisColumn.value = findFirstNumericColumn(columns.value); // 第一个数值型列
+          }
+          createChart();
+          viewType.value = type;
+        }
+      };
+
+      const toggleChartType = (type) => {
+        chartType.value = type;
+        createChart();
+      };
+
+      const columnOptions = computed(() => columns.value.map(col => ({ value: col.dataIndex, label: col.title })));
+
+      const createChart = () => {
+        if (!xAxisColumn.value || !yAxisColumn.value) return;
+
+        const xAxisData = dataSource.value.map(item => item[xAxisColumn.value]);
+        const yAxisData = dataSource.value.map(item => item[yAxisColumn.value]);
+
+        chartOption.value = {
+          tooltip: {
+            trigger: 'axis'
+          },
+          xAxis: {
+            type: 'category',
+            data: xAxisData,
+            name: columns.value.find(col => col.dataIndex === xAxisColumn.value).title
+          },
+          yAxis: {
+            type: 'value',
+            name: columns.value.find(col => col.dataIndex === yAxisColumn.value).title
+          },
+          series: [{
+            name: columns.value.find(col => col.dataIndex === yAxisColumn.value).title,
+            data: yAxisData,
+            type: chartType.value
+          }]
+        };
+
+        // 强制图表更新
+        if (chartRef.value) {
+          chartRef.value.setOption(chartOption.value, true);
+        }
+      };
+
+      const handleSelectorChange = () => {
+        // 如果当前视图是图表，则重新调用 createChart 方法
+        if (viewType.value !== 'table') {
+          createChart();
+        }
+      };
+
+      const findFirstNumericColumn = (cols) => {
+        for (const col of cols) {
+          if (typeof dataSource.value[0][col.dataIndex] === 'number') {
+            return col.dataIndex;
+          }
+        }
+        return ''; // 如果没有找到数值型列，则返回空字符串
+      };
+
+      const dataSource = ref([
+        {
+          key: '1',
+          name: '胡彦斌',
+          age: 32,
+          address: '西湖区湖底公园1号',
+        },
+        {
+          key: '2',
+          name: '胡彦祖',
+          age: 42,
+          address: '西湖区湖底公园1号',
+        },
+      ]);
+
+      const columns = ref([
+        {
+          title: '姓名',
+          dataIndex: 'name',
+          key: 'name',
+        },
+        {
+          title: '年龄',
+          dataIndex: 'age',
+          key: 'age',
+        },
+        {
+          title: '住址',
+          dataIndex: 'address',
+          key: 'address',
+        },
+      ]);
+
+      const chartOption = ref({
+        tooltip: {
+          trigger: 'axis'
+        },
+        xAxis: {
+          type: 'category',
+          data: []
+        },
+        yAxis: {
+          type: 'value'
+        },
+        series: [{
+          data: [],
+          type: 'line'
+        }]
+      });
+
+      return {
+        newTodo,
+        onSearch,
+        viewType,
+        toggleView,
+        toggleChartType,
+        columns,
+        dataSource,
+        chartOption,
+        xAxisColumn,
+        yAxisColumn,
+        columnOptions,
+        chartRef,
+        handleSelectorChange,
+      };
+    },
+  };
+</script>
+
+<style scoped>
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .header-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 60%;
+    margin-top: 20vh;
+    box-sizing: border-box;
+  }
+
+  .selectors {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* 选择器之间的间距 */
+    margin-top: 20px;
+  }
+
+  .selector-prompt {
+    font-size: 18px;
+  }
+
+  .content-switcher {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+  }
+
+  .table-container {
+    margin-top: 5vh;
+    width: 60%;
+    box-sizing: border-box;
+  }
+
+  .table-div {
+    width: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+
+  .chart-container {
+    width: 60%;
+    height: 400px;
+  }
+
+  .toggle-button-container {
+    position: absolute;
+    right: 5%; /* 距离浏览器右侧边缘5% */
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .toggle-button {
+    margin: 10px 0;
+    width: auto; /* 让宽度自适应内容 */
+    background-color: #1890ff;
+    border: none;
+    color: white;
+    font-size: 16px;
+    padding: 12px 24px; /* 增加padding以使按钮稍微大于文字 */
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.3s ease;
+    display: flex; /* 使用flex布局 */
+    justify-content: center; /* 水平居中 */
+    align-items: center; /* 垂直居中 */
+    text-align: center; /* 确保文本在内部也居中 */
+  }
+
+  .toggle-button:hover {
+    background-color: #0050b3;
+  }
+</style>

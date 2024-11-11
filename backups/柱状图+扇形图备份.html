@@ -1,0 +1,253 @@
+<template>
+    <div class="charts-container">
+        <!-- 柱状图容器 -->
+        <div ref="barChartRef" class="chart-container" style="height: 400px;"></div>
+
+        <!-- 包含两个饼图的容器 -->
+        <div class="charts-row">
+            <!-- 按横轴统计总数的饼图容器 -->
+            <div ref="byLocationPieChartRef" class="chart-container" style="width: 48%;">
+                <div class="chart" style="height: 400px;" ref="locationChartDiv">
+                    <button class="hide-button" @click="toggleVisibility('location')">隐藏</button>
+                </div>
+            </div>
+
+            <!-- 按图例统计总数的饼图容器 -->
+            <div ref="byLegendPieChartRef" class="chart-container" style="width: 48%;">
+                <div class="chart" style="height: 400px;" ref="legendChartDiv">
+                    <button class="hide-button" @click="toggleVisibility('legend')">隐藏</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script setup>
+    import { ref, onMounted, computed, watchEffect } from 'vue';
+    import * as echarts from 'echarts';
+
+    // 定义原始数据源
+    const columns = ['Perpetrator_ID', 'People_ID', 'Date', 'Year', 'Location', 'Country', 'Killed', 'Injured'];
+    const dataSource = [
+      { Perpetrator_ID: 1, People_ID: 1, Date: '04.26 April 26/27', Year: 1982.0, Location: 'Uiryeong', Country: 'South Korea', Killed: 56, Injured: 37 },
+      { Perpetrator_ID: 2, People_ID: 3, Date: '11.18 Nov. 18', Year: 1995.0, Location: 'Zhaodong', Country: 'China', Killed: 32, Injured: 16 },
+      { Perpetrator_ID: 3, People_ID: 4, Date: '05.21 May 21', Year: 1938.0, Location: 'Kaio', Country: 'Japan', Killed: 30, Injured: 3 },
+      { Perpetrator_ID: 4, People_ID: 6, Date: '09.20 Sep. 20', Year: 1994.0, Location: 'Beijing', Country: 'China', Killed: 23, Injured: 80 },
+      { Perpetrator_ID: 5, People_ID: 8, Date: '04.00 April', Year: 1950.0, Location: 'Nainital', Country: 'India', Killed: 22, Injured: 0 },
+    ];
+
+    // 将原始数据转换为柱状图所需的数据格式
+    const prepareDataForBarChart = () => {
+      const xData = dataSource.map(item => item.Location); // 使用第一列作为X轴数据
+      const seriesData = columns.filter(column =>
+        typeof dataSource[0][column] === 'number' && !column.includes('ID') && column !== 'Year'
+      ).reduce((acc, column) => {
+        acc.push({
+          name: column,
+          data: dataSource.map(item => item[column])
+        });
+        return acc;
+      }, []);
+
+      return { xData, seriesData };
+    };
+
+    // 按横轴统计总数
+    const getLocationTotals = () => {
+      const totals = {};
+      dataSource.forEach(item => {
+        const location = item.Location;
+        totals[location] = totals[location] || 0;
+        columns.filter(column => typeof item[column] === 'number' && !column.includes('ID') && column !== 'Year').forEach(column => {
+          totals[location] += item[column];
+        });
+      });
+      return totals;
+    };
+
+    // 按图例统计总数
+    const getLegendTotals = () => {
+      const totals = {};
+      columns.filter(column => typeof dataSource[0][column] === 'number' && !column.includes('ID') && column !== 'Year').forEach(column => {
+        totals[column] = dataSource.reduce((acc, cur) => acc + cur[column], 0);
+      });
+      return totals;
+    };
+
+    // 初始化图表容器
+    const barChartRef = ref(null);
+    const byLocationPieChartRef = ref(null);
+    const byLegendPieChartRef = ref(null);
+    const locationChartDiv = ref(null);
+    const legendChartDiv = ref(null);
+
+    // 初始化柱状图
+    const initBarChart = () => {
+      const { xData, seriesData } = prepareDataForBarChart();
+      const chart = echarts.init(barChartRef.value);
+      const option = {
+        legend: {
+          data: seriesData.map(series => series.name),
+          top: '0%',
+          textStyle: {
+            color: '#333'
+          },
+          selectedMode: 'multiple'
+        },
+        xAxis: {
+          type: 'category',
+          data: xData,
+          axisLabel: {
+            interval: 0,
+            rotate: -45,
+          },
+          axisTick: {
+            alignWithLabel: true,
+          },
+        },
+        yAxis: {
+          type: 'value',
+        },
+        series: seriesData.map(series => ({
+          name: series.name,
+          type: 'bar',
+          data: series.data,
+          itemStyle: {
+            normal: {
+              color: getUniqueColor(seriesData.indexOf(series)),
+            },
+          },
+        })),
+      };
+      chart.setOption(option);
+      return chart;
+    };
+
+    // 初始化按横轴统计总数的饼图
+    const initLocationPieChart = (totals) => {
+      const chart = echarts.init(locationChartDiv.value);
+      const option = {
+        tooltip: {
+          trigger: 'item',
+          formatter: '{a} <br/>{b} : {c} ({d}%)',
+        },
+        legend: {
+          data: Object.keys(totals),
+          orient: 'vertical',
+          left: 'left',
+          textStyle: {
+            color: '#333',
+          },
+          formatter: (name) => {
+            const index = Object.keys(totals).findIndex(label => label === name);
+            return `${name}: ${totals[name]}`;
+          },
+        },
+        series: [
+          {
+            name: 'Total by Location',
+            type: 'pie',
+            radius: '75%',
+            center: ['50%', '50%'],
+            data: Object.keys(totals).map(key => ({
+              value: totals[key],
+              name: key,
+            })),
+          },
+        ],
+      };
+      chart.setOption(option);
+      return chart;
+    };
+
+    // 初始化按图例统计总数的饼图
+    const initLegendPieChart = (totals) => {
+      const chart = echarts.init(legendChartDiv.value);
+      const option = {
+        tooltip: {
+          trigger: 'item',
+          formatter: '{a} <br/>{b} : {c} ({d}%)',
+        },
+        legend: {
+          data: Object.keys(totals),
+          orient: 'vertical',
+          right: 'right',
+          textStyle: {
+            color: '#333',
+          },
+          formatter: (name) => {
+            const index = Object.keys(totals).findIndex(label => label === name);
+            return `${name}: ${totals[name]}`;
+          },
+        },
+        series: [
+          {
+            name: 'Total by Legend',
+            type: 'pie',
+            radius: '75%',
+            center: ['50%', '50%'],
+            data: Object.keys(totals).map(key => ({
+              value: totals[key],
+              name: key,
+            })),
+          },
+        ],
+      };
+      chart.setOption(option);
+      return chart;
+    };
+
+    // 获取唯一颜色
+    const getUniqueColor = (index) => {
+      const colors = ['#5793f3', '#d14a61', '#675bba', '#e0c239', '#37a2da'];
+      return colors[index % colors.length];
+    };
+
+    // 切换饼图的可见性
+    const toggleVisibility = (type) => {
+      if (type === 'location') {
+        locationChartDiv.value.style.display = 'none';
+        legendChartDiv.value.style.width = '98%';
+      } else if (type === 'legend') {
+        legendChartDiv.value.style.display = 'none';
+        locationChartDiv.value.style.width = '98%';
+      }
+    };
+
+    // 计算统计总数
+    let locationTotals = getLocationTotals();
+    let legendTotals = getLegendTotals();
+
+    // 在组件挂载完成后初始化图表
+    onMounted(() => {
+      const barChart = initBarChart();
+      initLocationPieChart(locationTotals);
+      initLegendPieChart(legendTotals);
+    });
+</script>
+
+<style scoped>
+    .charts-container {
+      width: 60%;
+      margin: auto;
+    }
+
+    .chart-container {
+      margin-bottom: 20px;
+      background-color: #f0f0f0;
+      padding: 10px;
+      position: relative;
+    }
+
+    .charts-row {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .hide-button {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      z-index: 100;
+    }
+</style>

@@ -1,0 +1,289 @@
+<template>
+  <div class="container">
+    <!-- 输入搜索框 -->
+    <a-input-search
+            v-model="newTodo"
+            placeholder="请输入您要查询的问题"
+            enter-button="查询"
+            size="large"
+            @search="onSearch"
+            class="header-container"
+    />
+
+    <!-- 表格和折线图切换 -->
+    <div class="content-switcher">
+      <div v-if="viewType === 'table'" class="table-container">
+        <a-table :data-source="dataSource" :columns="columns" class="table-div" />
+      </div>
+      <div v-else class="chart-container">
+        <v-chart :option="chartOption" />
+      </div>
+    </div>
+
+    <!-- 可视化/表格切换按钮 -->
+    <div class="toggle-button-container">
+      <a-button v-if="viewType === 'table'" @click="toggleView('line')" class="toggle-button">
+        可视化
+      </a-button>
+      <a-button v-else @click="toggleView('table')" class="toggle-button">
+        表格
+      </a-button>
+      <a-button v-if="viewType !== 'table'" @click="toggleView('scatter')" class="toggle-button">
+        散点图
+      </a-button>
+      <a-button v-if="viewType !== 'table'" @click="toggleView('bar')" class="toggle-button">
+        柱状图
+      </a-button>
+    </div>
+  </div>
+</template>
+
+<script>
+  import { ref } from 'vue';
+  import { Input, Button, TableColumnsType } from 'ant-design-vue';
+  import * as echarts from 'echarts/core';
+  import { use } from 'echarts/core';
+  import { CanvasRenderer } from 'echarts/renderers';
+  import { LineChart, ScatterChart, BarChart } from 'echarts/charts';
+  import { GridComponent, TooltipComponent } from 'echarts/components';
+  import VChart from 'vue-echarts';
+  import axios from 'axios';
+
+  // 注册必须的组件
+  use([CanvasRenderer, LineChart, ScatterChart, BarChart, GridComponent, TooltipComponent]);
+
+  export default {
+      components: {
+          AInputSearch: Input.Search,
+          AButton: Button,
+          VChart,
+      },
+      setup() {
+          const newTodo = ref('');
+          const viewType = ref('table'); // 默认为表格视图
+          const chartType = ref('line'); // 默认为折线图
+          const db_id = ref('perpetrator');
+          function onSearch(value) {
+                if (typeof value === 'undefined' || value.trim() === '') {
+                    alert('问题不能为空');
+                    return;
+                }
+
+                axios.post('http://127.0.0.1:5000/axios', { 'question': value, 'db_id': db_id.value })
+                    .then(response => {
+                        // 更新响应式数据
+                        dataSource.value = response.data[0];
+                        columns.value = response.data[1];
+
+                        console.log("后端返回成功", response.data[0]);
+                        console.log("后端返回成功", response.data[1]);
+                    })
+                    .catch(error => {
+                        console.error('请求失败:', error);
+                    });
+          };
+
+          const toggleView = (type) => {
+              if (type === 'table') {
+                  // 切换回表格视图
+                  viewType.value = 'table';
+              } else {
+                  // 检查是否有数值型数据
+                  const numericColumn = findNumericColumn(dataSource.value, columns.value);
+                  const firstColumn = findFirstColumn(dataSource.value, columns.value);
+                  if (numericColumn && firstColumn) {
+                      // 绘制图表
+                      createChart(numericColumn, firstColumn, type);
+                      viewType.value = type;
+                      chartType.value = type;
+                  } else {
+                      alert('没有找到合适的数值型数据或第一列');
+                  }
+              }
+          };
+
+          const findNumericColumn = (dataSource, columns) => {
+              for (const column of columns) {
+                  const dataIndex = column.dataIndex;
+                  if (dataIndex && typeof dataSource[0][dataIndex] === 'number') {
+                      return { dataIndex, title: column.title };
+                  }
+              }
+              return null;
+          };
+
+          const findFirstColumn = (dataSource, columns) => {
+              for (const column of columns) {
+                  const dataIndex = column.dataIndex;
+                  if (dataIndex && dataIndex !== 'key') {
+                      return { dataIndex, title: column.title };
+                  }
+              }
+              return null;
+          };
+
+          const createChart = (numericColumn, firstColumn, type) => {
+              const yAxisData = dataSource.value.map(item => item[numericColumn.dataIndex]);
+              const xAxisData = dataSource.value.map(item => item[firstColumn.dataIndex]);
+
+              chartOption.value = {
+                  tooltip: {
+                      trigger: 'axis'
+                  },
+                  xAxis: {
+                      type: 'category',
+                      data: xAxisData,
+                      name: firstColumn.title  // 第一列的字段名作为X轴坐标名称
+                  },
+                  yAxis: {
+                      type: 'value',
+                      name: numericColumn.title  // 数值型数据的字段名作为Y轴坐标名称
+                  },
+                  series: [{
+                      name: numericColumn.title,  // 系列名称
+                      data: yAxisData,
+                      type: type  // 根据传入的type绘制不同类型的图表
+                  }]
+              };
+          };
+
+          const dataSource = ref([
+              {
+                  key: '1',
+                  name: '胡彦斌',
+                  age: 32,
+                  address: '西湖区湖底公园1号',
+              },
+              {
+                  key: '2',
+                  name: '胡彦祖',
+                  age: 42,
+                  address: '西湖区湖底公园1号',
+              },
+          ]);
+
+          const columns = ref([
+              {
+                  title: '姓名',
+                  dataIndex: 'name',
+                  key: 'name',
+              },
+              {
+                  title: '年龄',
+                  dataIndex: 'age',
+                  key: 'age',
+              },
+              {
+                  title: '住址',
+                  dataIndex: 'address',
+                  key: 'address',
+              },
+          ]);
+
+          const chartOption = ref({
+              tooltip: {
+                  trigger: 'axis'
+              },
+              xAxis: {
+                  type: 'category',
+                  data: []
+              },
+              yAxis: {
+                  type: 'value'
+              },
+              series: [{
+                  data: [],
+                  type: 'line'
+              }]
+          });
+
+          return {
+              newTodo,
+              onSearch,
+              viewType,
+              toggleView,
+              columns,
+              dataSource,
+              chartOption,
+          };
+      },
+  };
+</script>
+
+<style scoped>
+  /* 保持原有的样式不变 */
+  .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      padding: 20px;
+      box-sizing: border-box;
+      position: relative;
+  }
+
+  .header-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 60%;
+      margin-top: 20vh;
+      box-sizing: border-box;
+  }
+
+  .content-switcher {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-top: 20px;
+  }
+
+  .table-container {
+      margin-top: 5vh;
+      width: 60%;
+      box-sizing: border-box;
+  }
+
+  .table-div {
+      width: 100%;
+      padding: 20px;
+      box-sizing: border-box;
+  }
+
+  .chart-container {
+      width: 60%;
+      height: 400px;
+  }
+
+  .toggle-button-container {
+      position: fixed;
+      right: 10%;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+  }
+
+  .toggle-button {
+      margin: 10px 0;
+      width: auto; /* 让宽度自适应内容 */
+      background-color: #1890ff;
+      border: none;
+      color: white;
+      font-size: 16px;
+      padding: 12px 24px; /* 增加padding以使按钮稍微大于文字 */
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background-color 0.3s ease;
+      display: flex; /* 使用flex布局 */
+      justify-content: center; /* 水平居中 */
+      align-items: center; /* 垂直居中 */
+      text-align: center; /* 确保文本在内部也居中 */
+  }
+
+  .toggle-button:hover {
+      background-color: #0050b3;
+  }
+</style>
